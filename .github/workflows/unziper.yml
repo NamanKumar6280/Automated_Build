@@ -8,16 +8,14 @@ permissions:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       ########################################################
-      # Extract uploaded Unity ZIP
+      # Extract Unity ZIP into repository root
       ########################################################
 
       - name: Extract Unity Project
@@ -26,46 +24,53 @@ jobs:
           import zipfile
           import glob
           import os
-          import shutil
           import sys
 
           zips = glob.glob("*.zip")
 
           if not zips:
-              print("No zip found.")
+              print("No zip file found.")
               sys.exit(1)
 
           zip_file = zips[0]
 
-          print("Using:", zip_file)
+          print(f"Using ZIP: {zip_file}")
 
-          if os.path.exists("project"):
-              shutil.rmtree("project")
+          with zipfile.ZipFile(zip_file, "r") as z:
+              z.extractall(".")
 
-          os.makedirs("project", exist_ok=True)
-
-          with zipfile.ZipFile(zip_file) as z:
-              z.extractall("project")
-
-          print("Extraction Complete")
+          print("Extraction completed.")
           EOF
 
       ########################################################
-      # Generate scenes, prefabs, ScriptableObjects, etc.
+      # Show extracted files (debug)
       ########################################################
 
-      - name: Generate Unity Project
+      - name: Verify Extraction
+        run: |
+          echo "Repository root:"
+          ls -la
+
+          echo ""
+          echo "Unity folders:"
+          find . -maxdepth 2 -type d
+
+      ########################################################
+      # Generate project (SetupRunner)
+      ########################################################
+
+      - name: Run SetupRunner
         uses: game-ci/unity-builder@v4
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-
         with:
           unityVersion: 6000.0.35f1
-          projectPath: project
+          projectPath: .
           targetPlatform: Android
           buildMethod: ShelfLife.Editor.Setup.SetupRunner.Run
+          versioning: None
 
       ########################################################
       # Build APK
@@ -77,12 +82,12 @@ jobs:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-
         with:
           unityVersion: 6000.0.35f1
-          projectPath: project
+          projectPath: .
           targetPlatform: Android
           buildMethod: ShelfLife.Editor.Build.BuildScript.BuildAndroid
+          versioning: None
 
       ########################################################
       # Upload APK
@@ -90,7 +95,6 @@ jobs:
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
-
         with:
           name: ShelfLife-APK
-          path: project/Builds/*.apk
+          path: Builds/**/*.apk
