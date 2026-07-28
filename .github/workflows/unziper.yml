@@ -1,22 +1,26 @@
-name: Extract Unity Project
+name: Build Android APK
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  extract:
+  build:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Extract ZIP
+      ########################################################
+      # Extract uploaded Unity ZIP
+      ########################################################
+
+      - name: Extract Unity Project
         run: |
           python3 << 'EOF'
           import zipfile
@@ -25,50 +29,68 @@ jobs:
           import shutil
           import sys
 
-          # Find ZIP file
-          zip_files = glob.glob("*.zip")
+          zips = glob.glob("*.zip")
 
-          if not zip_files:
-              print("ERROR: No ZIP file found.")
+          if not zips:
+              print("No zip found.")
               sys.exit(1)
 
-          zip_path = zip_files[0]
-          print(f"Found ZIP: {zip_path}")
+          zip_file = zips[0]
 
-          # Extract into repository root
-          with zipfile.ZipFile(zip_path, "r") as z:
-              z.extractall(".")
+          print("Using:", zip_file)
 
-          print("Extraction complete.")
+          if os.path.exists("project"):
+              shutil.rmtree("project")
 
-          # Delete ZIP
-          os.remove(zip_path)
+          os.makedirs("project", exist_ok=True)
 
-          print("ZIP removed.")
+          with zipfile.ZipFile(zip_file) as z:
+              z.extractall("project")
+
+          print("Extraction Complete")
           EOF
 
-      - name: Show repository contents
-        run: |
-          ls -la
-          find . -maxdepth 2
+      ########################################################
+      # Generate scenes, prefabs, ScriptableObjects, etc.
+      ########################################################
 
-      - name: Commit extracted project
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Generate Unity Project
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
 
-          # Never commit workflow changes
-          git restore --staged .github/workflows || true
-          git checkout -- .github/workflows || true
+        with:
+          unityVersion: 6000.0.35f1
+          projectPath: project
+          targetPlatform: Android
+          buildMethod: ShelfLife.Editor.Setup.SetupRunner.Run
 
-          git add .
+      ########################################################
+      # Build APK
+      ########################################################
 
-          # Nothing changed?
-          if git diff --cached --quiet; then
-            echo "Nothing to commit."
-            exit 0
-          fi
+      - name: Build Android APK
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
 
-          git commit -m "Extract Unity project"
+        with:
+          unityVersion: 6000.0.35f1
+          projectPath: project
+          targetPlatform: Android
+          buildMethod: ShelfLife.Editor.Build.BuildScript.BuildAndroid
 
-          git push origin HEAD:main
+      ########################################################
+      # Upload APK
+      ########################################################
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: ShelfLife-APK
+          path: project/Builds/*.apk
