@@ -25,39 +25,50 @@ jobs:
           import shutil
           import sys
 
+          # Find ZIP file
           zip_files = glob.glob("*.zip")
 
           if not zip_files:
-              print("No ZIP file found.")
+              print("ERROR: No ZIP file found.")
               sys.exit(1)
 
           zip_path = zip_files[0]
-          print("Using:", zip_path)
+          print(f"Found ZIP: {zip_path}")
 
+          # Extract into repository root
           with zipfile.ZipFile(zip_path, "r") as z:
               z.extractall(".")
 
           print("Extraction complete.")
+
+          # Delete ZIP
+          os.remove(zip_path)
+
+          print("ZIP removed.")
           EOF
 
-      - name: Remove ZIP
+      - name: Show repository contents
         run: |
-          rm -f *.zip
+          ls -la
+          find . -maxdepth 2
 
+      - name: Commit extracted project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-        - name: Commit extracted project
-  run: |
-    git config user.name "github-actions[bot]"
-    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Never commit workflow changes
+          git restore --staged .github/workflows || true
+          git checkout -- .github/workflows || true
 
-    # Don't commit workflow changes
-    git restore --staged .github/workflows || true
-    git checkout -- .github/workflows || true
+          git add .
 
-    git add .
+          # Nothing changed?
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+            exit 0
+          fi
 
-    git diff --cached --quiet && echo "Nothing to commit" && exit 0
+          git commit -m "Extract Unity project"
 
-    git commit -m "Extract Unity project"
-
-    git push origin HEAD:main
+          git push origin HEAD:main
