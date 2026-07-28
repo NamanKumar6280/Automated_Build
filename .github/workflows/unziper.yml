@@ -1,30 +1,15 @@
-name: Unzip Unity Project
+- name: Extract ZIP
+  run: |
+    python3 - <<'EOF'
+    import zipfile
+    import os
 
-on:
-  workflow_dispatch:
+    zip_path = "ShelfLife_M1_Automated.zip"
 
-jobs:
-  unzip:
-    runs-on: ubuntu-latest
+    os.makedirs("project", exist_ok=True)
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall("project")
 
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
-
-      - name: Remove old extracted project
-        run: |
-          rm -rf project
-
-      - name: Extract Unity Project
-        run: |
-          unzip ShelfLife_M1_Automated.zip -d project
-
-      - name: Verify Extraction
-        run: |
-          ls -la project
-          ls -la project/Assets
-          ls -la project/Packages
-          ls -la project/ProjectSettings
+    print("Done")
+    EOF
