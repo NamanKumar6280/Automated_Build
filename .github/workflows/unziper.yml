@@ -1,15 +1,69 @@
-- name: Extract ZIP
-  run: |
-    python3 - <<'EOF'
-    import zipfile
-    import os
+name: Extract Unity Project
 
-    zip_path = "ShelfLife_M1_Automated.zip"
+on:
+  workflow_dispatch:
 
-    os.makedirs("project", exist_ok=True)
+jobs:
+  extract:
+    runs-on: ubuntu-latest
 
-    with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall("project")
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    print("Done")
-    EOF
+      - name: Extract ZIP using Python
+        run: |
+          python3 << 'EOF'
+          import zipfile
+          import os
+          import glob
+          import shutil
+          import sys
+
+          # Find all ZIP files in the repository root
+          zip_files = glob.glob("*.zip")
+
+          if not zip_files:
+              print("ERROR: No ZIP file found in the repository root.")
+              sys.exit(1)
+
+          zip_path = zip_files[0]
+          print(f"Found ZIP: {zip_path}")
+
+          # Remove previous extraction if it exists
+          if os.path.exists("project"):
+              shutil.rmtree("project")
+
+          os.makedirs("project", exist_ok=True)
+
+          print("Extracting...")
+
+          with zipfile.ZipFile(zip_path, "r") as zip_ref:
+              zip_ref.extractall("project")
+
+          print("Extraction completed!")
+
+          print("\nProject directory:")
+
+          for root, dirs, files in os.walk("project"):
+              level = root.replace("project", "").count(os.sep)
+              indent = " " * (4 * level)
+              print(f"{indent}{os.path.basename(root)}/")
+              subindent = " " * (4 * (level + 1))
+              for f in files[:5]:
+                  print(f"{subindent}{f}")
+
+          EOF
+
+      - name: Verify Unity Project
+        run: |
+          echo "Repository contents:"
+          ls -la
+
+          echo ""
+          echo "Project contents:"
+          ls -la project
+
+          echo ""
+          echo "Searching for Unity folders..."
+          find project -maxdepth 3 -type d | grep -E "Assets|Packages|ProjectSettings" || true
