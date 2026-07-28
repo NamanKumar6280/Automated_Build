@@ -3,6 +3,9 @@ name: Extract Unity Project
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   extract:
     runs-on: ubuntu-latest
@@ -10,60 +13,46 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extract ZIP using Python
+      - name: Extract ZIP
         run: |
           python3 << 'EOF'
           import zipfile
-          import os
           import glob
+          import os
           import shutil
           import sys
 
-          # Find all ZIP files in the repository root
           zip_files = glob.glob("*.zip")
 
           if not zip_files:
-              print("ERROR: No ZIP file found in the repository root.")
+              print("No ZIP file found.")
               sys.exit(1)
 
           zip_path = zip_files[0]
-          print(f"Found ZIP: {zip_path}")
+          print("Using:", zip_path)
 
-          # Remove previous extraction if it exists
-          if os.path.exists("project"):
-              shutil.rmtree("project")
+          with zipfile.ZipFile(zip_path, "r") as z:
+              z.extractall(".")
 
-          os.makedirs("project", exist_ok=True)
-
-          print("Extracting...")
-
-          with zipfile.ZipFile(zip_path, "r") as zip_ref:
-              zip_ref.extractall("project")
-
-          print("Extraction completed!")
-
-          print("\nProject directory:")
-
-          for root, dirs, files in os.walk("project"):
-              level = root.replace("project", "").count(os.sep)
-              indent = " " * (4 * level)
-              print(f"{indent}{os.path.basename(root)}/")
-              subindent = " " * (4 * (level + 1))
-              for f in files[:5]:
-                  print(f"{subindent}{f}")
-
+          print("Extraction complete.")
           EOF
 
-      - name: Verify Unity Project
+      - name: Remove ZIP
         run: |
-          echo "Repository contents:"
-          ls -la
+          rm -f *.zip
 
-          echo ""
-          echo "Project contents:"
-          ls -la project
+      - name: Commit extracted project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo ""
-          echo "Searching for Unity folders..."
-          find project -maxdepth 3 -type d | grep -E "Assets|Packages|ProjectSettings" || true
+          git add .
+
+          git diff --cached --quiet && echo "Nothing to commit" && exit 0
+
+          git commit -m "Extract Unity project"
+
+          git push origin HEAD:main
