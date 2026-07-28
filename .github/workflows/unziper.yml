@@ -1,0 +1,30 @@
+name: Unzip Unity Project
+
+on:
+  workflow_dispatch:
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Remove old extracted project
+        run: |
+          rm -rf project
+
+      - name: Extract Unity Project
+        run: |
+          unzip ShelfLife_M1_Automated.zip -d project
+
+      - name: Verify Extraction
+        run: |
+          ls -la project
+          ls -la project/Assets
+          ls -la project/Packages
+          ls -la project/ProjectSettings
