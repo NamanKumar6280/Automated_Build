@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK (Debug)
 
 on:
   workflow_dispatch:
@@ -8,93 +8,189 @@ permissions:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
 
-      ########################################################
-      # Extract Unity ZIP into repository root
-      ########################################################
+    ##########################################################
+    # Checkout
+    ##########################################################
 
-      - name: Extract Unity Project
-        run: |
-          python3 << 'EOF'
-          import zipfile
-          import glob
-          import os
-          import sys
+    - uses: actions/checkout@v4
 
-          zips = glob.glob("*.zip")
+    ##########################################################
+    # Extract ZIP
+    ##########################################################
 
-          if not zips:
-              print("No zip file found.")
-              sys.exit(1)
+    - name: Extract Unity Project
+      run: |
+        python3 << EOF
+        import zipfile
+        import glob
+        import os
+        import sys
 
-          zip_file = zips[0]
+        zips=glob.glob("*.zip")
 
-          print(f"Using ZIP: {zip_file}")
+        if not zips:
+            raise Exception("No ZIP found.")
 
-          with zipfile.ZipFile(zip_file, "r") as z:
-              z.extractall(".")
+        with zipfile.ZipFile(zips[0]) as z:
+            z.extractall(".")
 
-          print("Extraction completed.")
-          EOF
+        print("ZIP Extracted")
+        EOF
 
-      ########################################################
-      # Show extracted files (debug)
-      ########################################################
+    ##########################################################
+    # Show Folder Structure
+    ##########################################################
 
-      - name: Verify Extraction
-        run: |
-          echo "Repository root:"
-          ls -la
+    - name: Show Repository
+      run: |
+        pwd
+        find . -maxdepth 5
 
+    ##########################################################
+    # Run SetupRunner
+    ##########################################################
+
+    - name: Run SetupRunner
+      uses: game-ci/unity-builder@v4
+      continue-on-error: true
+
+      env:
+        UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+      with:
+        unityVersion: 6000.0.35f1
+        projectPath: .
+        targetPlatform: Android
+        buildMethod: ShelfLife.Editor.Setup.SetupRunner.Run
+        versioning: None
+
+    ##########################################################
+    # Show Generated Assets
+    ##########################################################
+
+    - name: List Generated Assets
+      if: always()
+      run: |
+        echo "========== SCENES =========="
+        find Assets -name "*.unity"
+
+        echo ""
+        echo "========== PREFABS =========="
+        find Assets -name "*.prefab"
+
+        echo ""
+        echo "========== SCRIPTABLE OBJECTS =========="
+        find Assets -name "*.asset"
+
+    ##########################################################
+    # Build APK
+    ##########################################################
+
+    - name: Build APK
+      uses: game-ci/unity-builder@v4
+      continue-on-error: true
+
+      env:
+        UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+      with:
+        unityVersion: 6000.0.35f1
+        projectPath: .
+        targetPlatform: Android
+        buildMethod: ShelfLife.Editor.Build.BuildScript.BuildAndroid
+        versioning: None
+
+    ##########################################################
+    # Print Unity Logs
+    ##########################################################
+
+    - name: Print Unity Logs
+      if: always()
+      run: |
+        echo "=========================="
+        echo "UNITY LOGS"
+        echo "=========================="
+
+        find /root -name "Editor.log"
+
+        for f in $(find /root -name "Editor.log")
+        do
           echo ""
-          echo "Unity folders:"
-          find . -maxdepth 2 -type d
+          echo "====================================="
+          echo "$f"
+          echo "====================================="
+          cat "$f"
+        done
 
-      ########################################################
-      # Generate project (SetupRunner)
-      ########################################################
+    ##########################################################
+    # Search Compiler Errors
+    ##########################################################
 
-      - name: Run SetupRunner
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        with:
-          unityVersion: 6000.0.35f1
-          projectPath: .
-          targetPlatform: Android
-          buildMethod: ShelfLife.Editor.Setup.SetupRunner.Run
-          versioning: None
+    - name: Extract Compiler Errors
+      if: always()
+      run: |
+        echo ""
+        echo "=========== ERRORS ==========="
 
-      ########################################################
-      # Build APK
-      ########################################################
+        grep -R "error CS" /root || true
 
-      - name: Build Android APK
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        with:
-          unityVersion: 6000.0.35f1
-          projectPath: .
-          targetPlatform: Android
-          buildMethod: ShelfLife.Editor.Build.BuildScript.BuildAndroid
-          versioning: None
+        grep -R "Exception" /root || true
 
-      ########################################################
-      # Upload APK
-      ########################################################
+        grep -R "Build failed" /root || true
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShelfLife-APK
-          path: Builds/**/*.apk
+        grep -R "Scripts have compiler errors" /root || true
+
+    ##########################################################
+    # Upload Entire Unity Log
+    ##########################################################
+
+    - name: Upload Logs
+      if: always()
+      uses: actions/upload-artifact@v4
+
+      with:
+        name: UnityLogs
+
+        path: |
+          /root/.config/unity3d/Editor.log
+          /root/.config/unity3d/**/*.log
+
+    ##########################################################
+    # Upload Generated Project
+    ##########################################################
+
+    - name: Upload Generated Project
+      if: always()
+      uses: actions/upload-artifact@v4
+
+      with:
+        name: GeneratedProject
+
+        path: |
+          Assets
+          Packages
+          ProjectSettings
+
+    ##########################################################
+    # Upload APK
+    ##########################################################
+
+    - name: Upload APK
+      if: always()
+      uses: actions/upload-artifact@v4
+
+      with:
+        name: APK
+
+        path: |
+          Builds
+          **/*.apk
