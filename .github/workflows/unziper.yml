@@ -1,196 +1,151 @@
-name: Build Android APK (Debug)
+name: AI Unity Build Pipeline
 
 on:
+  push:
+    branches: [ main, master ]
+  pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    ##########################################################
-    # Checkout
-    ##########################################################
+      # ------------------------------------------------------------
+      # STEP 1: Validate project structure BEFORE Unity runs
+      # ------------------------------------------------------------
+      - name: Validate Unity project
+        run: python Scripts/validate_project.py
+        continue-on-error: false
 
-    - uses: actions/checkout@v4
+      # ------------------------------------------------------------
+      # STEP 2: Install Unity (cached)
+      # ------------------------------------------------------------
+      - name: Cache Unity
+        uses: actions/cache@v3
+        with:
+          path: /opt/unity
+          key: unity-6000.0.35f1-android
 
-    ##########################################################
-    # Extract ZIP
-    ##########################################################
+      - name: Install Unity
+        uses: game-ci/unity-setup@v2
+        with:
+          version: 6000.0.35f1
+          components: android
 
-    - name: Extract Unity Project
-      run: |
-        python3 << EOF
-        import zipfile
-        import glob
-        import os
-        import sys
+      - name: Activate Unity license
+        uses: game-ci/unity-activate@v2
+        env:
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
-        zips=glob.glob("*.zip")
+      # ------------------------------------------------------------
+      # STEP 3: Compile only – capture compiler errors
+      # ------------------------------------------------------------
+      - name: Compile scripts (headless)
+        id: compile
+        run: |
+          /opt/unity/Editor/Unity \
+            -batchmode -nographics -quit \
+            -projectPath $GITHUB_WORKSPACE \
+            -executeMethod ShelfLife.Editor.CompileOnly.Compile \
+            -logFile compile.log \
+            -silent-crashes
+          echo "UNITY_EXIT_CODE=$?" >> $GITHUB_ENV
+        continue-on-error: true
 
-        if not zips:
-            raise Exception("No ZIP found.")
+      - name: Parse compile errors
+        run: python Scripts/parse_unity_log.py compile.log compile_errors.json
+        if: always()
 
-        with zipfile.ZipFile(zips[0]) as z:
-            z.extractall(".")
+      # ------------------------------------------------------------
+      # STEP 4: If compile fails, generate AI report and stop
+      # ------------------------------------------------------------
+      - name: Generate AI Report (compile failure)
+        if: env.UNITY_EXIT_CODE != 0
+        run: |
+          python Scripts/generate_ai_report.py \
+            --compile-errors compile_errors.json \
+            --output AIReport.md
+          # Also generate JSON for AI
+          python Scripts/generate_ai_report.py \
+            --compile-errors compile_errors.json \
+            --json --output AIReport.json
 
-        print("ZIP Extracted")
-        EOF
+      - name: Upload compile failure report
+        if: env.UNITY_EXIT_CODE != 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-report-compile-failed
+          path: |
+            AIReport.md
+            AIReport.json
+            compile_errors.json
+            compile.log
 
-    ##########################################################
-    # Show Folder Structure
-    ##########################################################
+      - name: Fail workflow if compile fails
+        if: env.UNITY_EXIT_CODE != 0
+        run: exit 1
 
-    - name: Show Repository
-      run: |
-        pwd
-        find . -maxdepth 5
+      # ------------------------------------------------------------
+      # STEP 5: Run SetupRunner (generates scenes, prefabs, assets)
+      # ------------------------------------------------------------
+      - name: Run SetupRunner
+        run: |
+          /opt/unity/Editor/Unity \
+            -batchmode -nographics -quit \
+            -projectPath $GITHUB_WORKSPACE \
+            -executeMethod ShelfLife.Editor.Setup.SetupRunner.Run \
+            -logFile setup.log
 
-    ##########################################################
-    # Run SetupRunner
-    ##########################################################
+      # ------------------------------------------------------------
+      # STEP 6: Validate generated assets (scenes, prefabs, etc.)
+      # ------------------------------------------------------------
+      - name: Validate generated assets
+        run: python Scripts/validate_project.py --generated
 
-    - name: Run SetupRunner
-      uses: game-ci/unity-builder@v4
-      continue-on-error: true
+      - name: Generate project report
+        run: python Scripts/generate_project_report.py
 
-      env:
-        UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      - name: Upload project report
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-report
+          path: project_report.md
 
-      with:
-        unityVersion: 6000.0.35f1
-        projectPath: .
-        targetPlatform: Android
-        buildMethod: ShelfLife.Editor.Setup.SetupRunner.Run
-        versioning: None
+      # ------------------------------------------------------------
+      # STEP 7: Build Android APK
+      # ------------------------------------------------------------
+      - name: Build APK
+        run: |
+          /opt/unity/Editor/Unity \
+            -batchmode -nographics -quit \
+            -projectPath $GITHUB_WORKSPACE \
+            -executeMethod ShelfLife.Editor.Build.BuildScript.BuildAndroid \
+            -logFile build.log
 
-    ##########################################################
-    # Show Generated Assets
-    ##########################################################
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShelfLife.apk
+          path: Builds/*.apk
 
-    - name: List Generated Assets
-      if: always()
-      run: |
-        echo "========== SCENES =========="
-        find Assets -name "*.unity"
+      # ------------------------------------------------------------
+      # STEP 8: Final AI Report (success)
+      # ------------------------------------------------------------
+      - name: Generate final AI report
+        run: |
+          python Scripts/generate_ai_report.py \
+            --success \
+            --apk-size $(ls -l Builds/*.apk | awk '{print $5}') \
+            --build-time $(cat build.log | grep "Build completed" | awk '{print $4}') \
+            --output AIReport.md
 
-        echo ""
-        echo "========== PREFABS =========="
-        find Assets -name "*.prefab"
-
-        echo ""
-        echo "========== SCRIPTABLE OBJECTS =========="
-        find Assets -name "*.asset"
-
-    ##########################################################
-    # Build APK
-    ##########################################################
-
-    - name: Build APK
-      uses: game-ci/unity-builder@v4
-      continue-on-error: true
-
-      env:
-        UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-
-      with:
-        unityVersion: 6000.0.35f1
-        projectPath: .
-        targetPlatform: Android
-        buildMethod: ShelfLife.Editor.Build.BuildScript.BuildAndroid
-        versioning: None
-
-    ##########################################################
-    # Print Unity Logs
-    ##########################################################
-
-    - name: Print Unity Logs
-      if: always()
-      run: |
-        echo "=========================="
-        echo "UNITY LOGS"
-        echo "=========================="
-
-        find /root -name "Editor.log"
-
-        for f in $(find /root -name "Editor.log")
-        do
-          echo ""
-          echo "====================================="
-          echo "$f"
-          echo "====================================="
-          cat "$f"
-        done
-
-    ##########################################################
-    # Search Compiler Errors
-    ##########################################################
-
-    - name: Extract Compiler Errors
-      if: always()
-      run: |
-        echo ""
-        echo "=========== ERRORS ==========="
-
-        grep -R "error CS" /root || true
-
-        grep -R "Exception" /root || true
-
-        grep -R "Build failed" /root || true
-
-        grep -R "Scripts have compiler errors" /root || true
-
-    ##########################################################
-    # Upload Entire Unity Log
-    ##########################################################
-
-    - name: Upload Logs
-      if: always()
-      uses: actions/upload-artifact@v4
-
-      with:
-        name: UnityLogs
-
-        path: |
-          /root/.config/unity3d/Editor.log
-          /root/.config/unity3d/**/*.log
-
-    ##########################################################
-    # Upload Generated Project
-    ##########################################################
-
-    - name: Upload Generated Project
-      if: always()
-      uses: actions/upload-artifact@v4
-
-      with:
-        name: GeneratedProject
-
-        path: |
-          Assets
-          Packages
-          ProjectSettings
-
-    ##########################################################
-    # Upload APK
-    ##########################################################
-
-    - name: Upload APK
-      if: always()
-      uses: actions/upload-artifact@v4
-
-      with:
-        name: APK
-
-        path: |
-          Builds
-          **/*.apk
+      - name: Upload final AI report
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-ai-report
+          path: AIReport.md
