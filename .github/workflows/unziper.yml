@@ -21,28 +21,41 @@ jobs:
         run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # Extract Unity version and sanitize
+      # Extract Unity version and hash - FIXED
       # ------------------------------------------------------------
-      - name: Read Unity version
-        id: unity-version
+      - name: Read Unity version and hash
         run: |
           if [ ! -f "ProjectSettings/ProjectVersion.txt" ]; then
             echo "ERROR: ProjectVersion.txt not found!"
             exit 1
           fi
-          VERSION_LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
-          VERSION=$(echo "$VERSION_LINE" | awk '{print $2}' | tr -d '\n\r' | xargs)
-          HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()' | tr -d '\n\r' | xargs)
-          echo "Raw VERSION: '$VERSION'"
-          echo "Raw HASH: '$HASH'"
-          # If hash is missing or placeholder, use known good hash for 6000.0.35f1
+
+          # Read the whole line
+          LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
+
+          # Extract version: everything after the colon, before first space/tab
+          VERSION=$(echo "$LINE" | cut -d ':' -f2 | awk '{print $1}' | tr -d '\n\r' | xargs)
+
+          # Extract hash: the part in parentheses, if present
+          HASH=$(echo "$LINE" | grep -o '([^)]*)' | tr -d '()' | xargs || true)
+
+          echo "Raw line: $LINE"
+          echo "Extracted VERSION: '$VERSION'"
+          echo "Extracted HASH: '$HASH'"
+
+          # If hash is empty or placeholder, use known good hash for Unity 6000.0.35f1
           if [ -z "$HASH" ] || [ "$HASH" = "somehash" ]; then
             HASH="d9a043e8a3d5"
             echo "Using fallback hash: $HASH"
           fi
+
           # Set environment variables
           echo "UNITY_VERSION=$VERSION" >> $GITHUB_ENV
           echo "UNITY_HASH=$HASH" >> $GITHUB_ENV
+
+          # Also store in files for debugging
+          echo "$VERSION" > unity_version.txt
+          echo "$HASH" > unity_hash.txt
 
       # ------------------------------------------------------------
       # Install Unity with dependencies and xvfb
@@ -67,10 +80,10 @@ jobs:
 
           # Debug: print the variables
           echo "=== Environment Variables ==="
-          echo "UNITY_VERSION=$UNITY_VERSION"
-          echo "UNITY_HASH=$UNITY_HASH"
+          echo "UNITY_VERSION='$UNITY_VERSION'"
+          echo "UNITY_HASH='$UNITY_HASH'"
 
-          # Build URL using the hash (now valid)
+          # Build URL using the hash
           URL="https://download.unity3d.com/download_unity/$UNITY_HASH/UnitySetup-$UNITY_VERSION"
           echo "Downloading from: $URL"
 
