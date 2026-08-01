@@ -18,31 +18,25 @@ jobs:
       # ------------------------------------------------------------
       - name: Validate Unity project
         run: python Scripts/validate_project.py
-        continue-on-error: false
 
       # ------------------------------------------------------------
-      # STEP 2: Install Unity (using RageAgainstThePixel)
+      # STEP 2: Install Unity & activate license (all in one)
       # ------------------------------------------------------------
-      - name: Install Unity
-        id: unity-install
+      - name: Install and activate Unity
+        id: unity-setup
         uses: RageAgainstThePixel/unity-setup@v2
         with:
           version-file: 'ProjectSettings/ProjectVersion.txt'
           build-targets: Android
           cache-installation: true
-
-      # ------------------------------------------------------------
-      # STEP 3: Activate Unity license (using RageAgainstThePixel)
-      # ------------------------------------------------------------
-      - name: Activate Unity License
-        uses: RageAgainstThePixel/unity-activate@v2
         env:
+          # These environment variables will be picked up by the action to activate Unity
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
       # ------------------------------------------------------------
-      # STEP 4: Compile only – capture compiler errors
+      # STEP 3: Compile only – capture compiler errors
       # ------------------------------------------------------------
       - name: Compile scripts (headless)
         id: compile
@@ -59,7 +53,7 @@ jobs:
         if: always()
 
       # ------------------------------------------------------------
-      # STEP 5: If compile fails, generate AI report and stop
+      # STEP 4: If compile fails, generate AI report and stop
       # ------------------------------------------------------------
       - name: Generate AI Report (compile failure)
         if: steps.compile.outcome != 'success'
@@ -87,7 +81,7 @@ jobs:
         run: exit 1
 
       # ------------------------------------------------------------
-      # STEP 6: Run SetupRunner (generates scenes, prefabs, assets)
+      # STEP 5: Run SetupRunner (generates scenes, prefabs, assets)
       # ------------------------------------------------------------
       - name: Run SetupRunner
         run: |
@@ -98,7 +92,7 @@ jobs:
             -logFile setup.log
 
       # ------------------------------------------------------------
-      # STEP 7: Validate generated assets
+      # STEP 6: Validate generated assets
       # ------------------------------------------------------------
       - name: Validate generated assets
         run: python Scripts/validate_project.py --generated
@@ -113,7 +107,7 @@ jobs:
           path: project_report.md
 
       # ------------------------------------------------------------
-      # STEP 8: Build Android APK
+      # STEP 7: Build Android APK
       # ------------------------------------------------------------
       - name: Build APK
         run: |
@@ -131,7 +125,7 @@ jobs:
           if-no-files-found: error
 
       # ------------------------------------------------------------
-      # STEP 9: Final AI Report (success)
+      # STEP 8: Final AI Report (success)
       # ------------------------------------------------------------
       - name: Generate final AI report
         if: always()
