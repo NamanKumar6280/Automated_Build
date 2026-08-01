@@ -9,14 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      # Unity 6000.0.35f1 with Android support
-      image: unityci/editor:ubuntu-6000.0.35f1-android
-      env:
-        # These environment variables are used by the activation script
-        UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-        UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
-        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
     steps:
       - name: Checkout code
@@ -35,24 +27,52 @@ jobs:
         run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # STEP 3: Activate Unity license (inside container)
+      # STEP 3: Install Unity manually (Linux)
+      # ------------------------------------------------------------
+      - name: Install Unity 6000.0.35f1
+        run: |
+          # Download Unity installer (Linux)
+          wget -q https://download.unity3d.com/download_unity/6000.0.35f1/UnitySetup-6000.0.35f1 \
+            -O UnitySetup
+          chmod +x UnitySetup
+          # Install to /opt/unity
+          sudo mkdir -p /opt/unity
+          sudo ./UnitySetup --unattended --install-location /opt/unity
+          # Add Unity to PATH
+          echo "/opt/unity/Editor" >> $GITHUB_PATH
+          # Verify installation
+          /opt/unity/Editor/Unity -version
+
+      # ------------------------------------------------------------
+      # STEP 4: Install Android build support (optional but recommended)
+      # ------------------------------------------------------------
+      - name: Install Android components
+        run: |
+          # Download Android module installer
+          wget -q https://download.unity3d.com/download_unity/6000.0.35f1/UnitySetup-Android-Support-for-Editor-6000.0.35f1 \
+            -O AndroidSetup
+          chmod +x AndroidSetup
+          sudo ./AndroidSetup --unattended --install-location /opt/unity
+
+      # ------------------------------------------------------------
+      # STEP 5: Activate Unity license (if you have a license)
       # ------------------------------------------------------------
       - name: Activate Unity License
         run: |
           /opt/unity/Editor/Unity \
             -batchmode -nographics -quit \
-            -serial $UNITY_SERIAL \
-            -username $UNITY_USERNAME \
-            -password $UNITY_PASSWORD \
+            -serial ${{ secrets.UNITY_SERIAL }} \
+            -username ${{ secrets.UNITY_USERNAME }} \
+            -password ${{ secrets.UNITY_PASSWORD }} \
             -logFile /dev/null
         env:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        continue-on-error: true
+        continue-on-error: true   # Allows build to proceed even if activation fails (trial mode)
 
       # ------------------------------------------------------------
-      # STEP 4: Compile scripts
+      # STEP 6: Compile scripts (headless)
       # ------------------------------------------------------------
       - name: Compile scripts
         id: compile
@@ -64,16 +84,10 @@ jobs:
             -logFile compile.log
         continue-on-error: true
 
-      # ------------------------------------------------------------
-      # STEP 5: Parse compile errors
-      # ------------------------------------------------------------
       - name: Parse compile errors
         if: always()
         run: python3 Scripts/parse_unity_log.py compile.log compile_errors.json
 
-      # ------------------------------------------------------------
-      # STEP 6: Generate AI report if compile failed
-      # ------------------------------------------------------------
       - name: Generate AI Report (compile failure)
         if: steps.compile.outcome != 'success'
         run: |
