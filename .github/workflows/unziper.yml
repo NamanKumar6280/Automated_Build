@@ -1,234 +1,50 @@
-name: AI Unity Build Pipeline
+# .github/workflows/build-apk.yml
+name: Build Unity APK
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-  workflow_dispatch:
+    branches: [ main ]
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
 
 jobs:
   build:
+    name: Extract & Build APK
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Unzip project
-        run: python3 Scripts/unzip_project.py
-
-      - name: Validate Unity project
-        run: python3 Scripts/validate_project.py
-
-      # ------------------------------------------------------------
-      # Extract Unity version and hash - FIXED
-      # ------------------------------------------------------------
-      - name: Read Unity version and hash
+      - name: Extract Unity project ZIP
         run: |
-          if [ ! -f "ProjectSettings/ProjectVersion.txt" ]; then
-            echo "ERROR: ProjectVersion.txt not found!"
-            exit 1
+          unzip -o UnityProject.zip -d extracted
+          # If the zip contains a nested folder, move its contents up
+          # so 'extracted' IS the Unity project root (has Assets/, ProjectSettings/, etc)
+          if [ -d extracted/*/Assets ]; then
+            mv extracted/*/* extracted/
           fi
+          ls extracted
 
-          # Read the whole line
-          LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: extracted/Library
+          key: Library-${{ hashFiles('extracted/Assets/**') }}
+          restore-keys: Library-
 
-          # Extract version: everything after the colon, before first space/tab
-          VERSION=$(echo "$LINE" | cut -d ':' -f2 | awk '{print $1}' | tr -d '\n\r' | xargs)
-
-          # Extract hash: the part in parentheses, if present
-          HASH=$(echo "$LINE" | grep -o '([^)]*)' | tr -d '()' | xargs || true)
-
-          echo "Raw line: $LINE"
-          echo "Extracted VERSION: '$VERSION'"
-          echo "Extracted HASH: '$HASH'"
-
-          # If hash is empty or placeholder, use known good hash for Unity 6000.0.35f1
-          if [ -z "$HASH" ] || [ "$HASH" = "somehash" ]; then
-            HASH="d9a043e8a3d5"
-            echo "Using fallback hash: $HASH"
-          fi
-
-          # Set environment variables
-          echo "UNITY_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "UNITY_HASH=$HASH" >> $GITHUB_ENV
-
-          # Also store in files for debugging
-          echo "$VERSION" > unity_version.txt
-          echo "$HASH" > unity_hash.txt
-
-      # ------------------------------------------------------------
-      # Install Unity with dependencies and xvfb
-      # ------------------------------------------------------------
-      - name: Install Unity
-        run: |
-          # Install system dependencies for Ubuntu 24.04 (Noble)
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            libgl1 \
-            libglu1-mesa \
-            libxrandr2 \
-            libxcursor1 \
-            libxinerama1 \
-            libxi6 \
-            libxext6 \
-            libxfixes3 \
-            libx11-6 \
-            libxrender1 \
-            xvfb \
-            wget
-
-          # Debug: print the variables
-          echo "=== Environment Variables ==="
-          echo "UNITY_VERSION='$UNITY_VERSION'"
-          echo "UNITY_HASH='$UNITY_HASH'"
-
-          # Build URL using the hash
-          URL="https://download.unity3d.com/download_unity/$UNITY_HASH/UnitySetup-$UNITY_VERSION"
-          echo "Downloading from: $URL"
-
-          wget -q "$URL" -O UnitySetup
-          if [ $? -ne 0 ]; then
-            echo "WARNING: Download with hash failed, trying version-only URL"
-            URL="https://download.unity3d.com/download_unity/$UNITY_VERSION/UnitySetup-$UNITY_VERSION"
-            wget -q "$URL" -O UnitySetup
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Both download attempts failed."
-              exit 1
-            fi
-          fi
-
-          chmod +x UnitySetup
-
-          # Install using xvfb
-          xvfb-run sudo ./UnitySetup --unattended --install-location /opt/unity --components=Unity,Android
-
-          # Add to PATH
-          echo "/opt/unity/Editor" >> $GITHUB_PATH
-
-          # Verify
-          /opt/unity/Editor/Unity -version
-
-      # ------------------------------------------------------------
-      # Activate Unity license (optional)
-      # ------------------------------------------------------------
-      - name: Activate Unity License
-        run: |
-          /opt/unity/Editor/Unity \
-            -batchmode -nographics -quit \
-            -serial ${{ secrets.UNITY_SERIAL }} \
-            -username ${{ secrets.UNITY_USERNAME }} \
-            -password ${{ secrets.UNITY_PASSWORD }} \
-            -logFile /dev/null
+      - name: Build Android APK
+        uses: game-ci/unity-builder@v4
         env:
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-          UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        continue-on-error: true
-
-      # ------------------------------------------------------------
-      # Compile scripts
-      # ------------------------------------------------------------
-      - name: Compile scripts
-        id: compile
-        run: |
-          /opt/unity/Editor/Unity \
-            -batchmode -nographics -quit \
-            -projectPath $GITHUB_WORKSPACE \
-            -executeMethod ShelfLife.Editor.CompileOnly.Compile \
-            -logFile compile.log
-        continue-on-error: true
-
-      - name: Parse compile errors
-        if: always()
-        run: python3 Scripts/parse_unity_log.py compile.log compile_errors.json
-
-      - name: Generate AI Report (compile failure)
-        if: steps.compile.outcome != 'success'
-        run: |
-          python3 Scripts/generate_ai_report.py \
-            --compile-errors compile_errors.json \
-            --output AIReport.md
-          python3 Scripts/generate_ai_report.py \
-            --compile-errors compile_errors.json \
-            --json --output AIReport.json
-
-      - name: Upload compile failure report
-        if: steps.compile.outcome != 'success'
-        uses: actions/upload-artifact@v4
         with:
-          name: ai-report-compile-failed
-          path: |
-            AIReport.md
-            AIReport.json
-            compile_errors.json
-            compile.log
-
-      - name: Fail workflow if compile fails
-        if: steps.compile.outcome != 'success'
-        run: exit 1
-
-      # ------------------------------------------------------------
-      # Run SetupRunner
-      # ------------------------------------------------------------
-      - name: Run SetupRunner
-        run: |
-          /opt/unity/Editor/Unity \
-            -batchmode -nographics -quit \
-            -projectPath $GITHUB_WORKSPACE \
-            -executeMethod ShelfLife.Editor.Setup.SetupRunner.Run \
-            -logFile setup.log
-
-      # ------------------------------------------------------------
-      # Validate generated assets
-      # ------------------------------------------------------------
-      - name: Validate generated assets
-        run: python3 Scripts/validate_project.py --generated
-
-      - name: Generate project report
-        run: python3 Scripts/generate_project_report.py
-
-      - name: Upload project report
-        uses: actions/upload-artifact@v4
-        with:
-          name: project-report
-          path: project_report.md
-
-      # ------------------------------------------------------------
-      # Build Android APK
-      # ------------------------------------------------------------
-      - name: Build APK
-        run: |
-          /opt/unity/Editor/Unity \
-            -batchmode -nographics -quit \
-            -projectPath $GITHUB_WORKSPACE \
-            -executeMethod ShelfLife.Editor.Build.BuildScript.BuildAndroid \
-            -logFile build.log
+          projectPath: extracted
+          targetPlatform: Android
+          buildName: GeneratedProject
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ShelfLife.apk
-          path: Builds/*.apk
-          if-no-files-found: error
-
-      # ------------------------------------------------------------
-      # Final AI Report
-      # ------------------------------------------------------------
-      - name: Generate final AI report
-        if: always()
-        run: |
-          SIZE=$(stat -c%s Builds/*.apk 2>/dev/null || echo "0")
-          TIME=$(grep -o "Build completed in [0-9.]* seconds" build.log 2>/dev/null | awk '{print $4}' || echo "unknown")
-          python3 Scripts/generate_ai_report.py \
-            --success \
-            --apk-size "$SIZE" \
-            --build-time "$TIME" \
-            --output AIReport.md
-
-      - name: Upload final AI report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: final-ai-report
-          path: AIReport.md
+          name: GeneratedAPK
+          path: build/Android
