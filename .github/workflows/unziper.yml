@@ -9,6 +9,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      # Unity 6000.0.35f1 with Android support
+      image: unityci/editor:ubuntu-6000.0.35f1-android
+      env:
+        # These environment variables are used by the activation script
+        UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
+        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -17,28 +26,30 @@ jobs:
       # STEP 1: Unzip the Unity project
       # ------------------------------------------------------------
       - name: Unzip project
-        run: python Scripts/unzip_project.py
+        run: python3 Scripts/unzip_project.py
 
       # ------------------------------------------------------------
       # STEP 2: Validate project structure
       # ------------------------------------------------------------
       - name: Validate Unity project
-        run: python Scripts/validate_project.py
+        run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # STEP 3: Install & activate Unity
+      # STEP 3: Activate Unity license (inside container)
       # ------------------------------------------------------------
-      - name: Install Unity
-        id: unity-setup
-        uses: RageAgainstThePixel/unity-setup@v2
-        with:
-          version-file: 'ProjectSettings/ProjectVersion.txt'
-          build-targets: Android
-          cache-installation: true
+      - name: Activate Unity License
+        run: |
+          /opt/unity/Editor/Unity \
+            -batchmode -nographics -quit \
+            -serial $UNITY_SERIAL \
+            -username $UNITY_USERNAME \
+            -password $UNITY_PASSWORD \
+            -logFile /dev/null
         env:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        continue-on-error: true
 
       # ------------------------------------------------------------
       # STEP 4: Compile scripts
@@ -46,7 +57,7 @@ jobs:
       - name: Compile scripts
         id: compile
         run: |
-          ${{ env.UNITY_EDITOR_PATH }} \
+          /opt/unity/Editor/Unity \
             -batchmode -nographics -quit \
             -projectPath $GITHUB_WORKSPACE \
             -executeMethod ShelfLife.Editor.CompileOnly.Compile \
@@ -54,11 +65,11 @@ jobs:
         continue-on-error: true
 
       # ------------------------------------------------------------
-      # STEP 5: Parse compile errors (if log exists)
+      # STEP 5: Parse compile errors
       # ------------------------------------------------------------
       - name: Parse compile errors
         if: always()
-        run: python Scripts/parse_unity_log.py compile.log compile_errors.json
+        run: python3 Scripts/parse_unity_log.py compile.log compile_errors.json
 
       # ------------------------------------------------------------
       # STEP 6: Generate AI report if compile failed
@@ -66,10 +77,10 @@ jobs:
       - name: Generate AI Report (compile failure)
         if: steps.compile.outcome != 'success'
         run: |
-          python Scripts/generate_ai_report.py \
+          python3 Scripts/generate_ai_report.py \
             --compile-errors compile_errors.json \
             --output AIReport.md
-          python Scripts/generate_ai_report.py \
+          python3 Scripts/generate_ai_report.py \
             --compile-errors compile_errors.json \
             --json --output AIReport.json
 
@@ -93,7 +104,7 @@ jobs:
       # ------------------------------------------------------------
       - name: Run SetupRunner
         run: |
-          ${{ env.UNITY_EDITOR_PATH }} \
+          /opt/unity/Editor/Unity \
             -batchmode -nographics -quit \
             -projectPath $GITHUB_WORKSPACE \
             -executeMethod ShelfLife.Editor.Setup.SetupRunner.Run \
@@ -103,10 +114,10 @@ jobs:
       # STEP 8: Validate generated assets
       # ------------------------------------------------------------
       - name: Validate generated assets
-        run: python Scripts/validate_project.py --generated
+        run: python3 Scripts/validate_project.py --generated
 
       - name: Generate project report
-        run: python Scripts/generate_project_report.py
+        run: python3 Scripts/generate_project_report.py
 
       - name: Upload project report
         uses: actions/upload-artifact@v4
@@ -119,7 +130,7 @@ jobs:
       # ------------------------------------------------------------
       - name: Build APK
         run: |
-          ${{ env.UNITY_EDITOR_PATH }} \
+          /opt/unity/Editor/Unity \
             -batchmode -nographics -quit \
             -projectPath $GITHUB_WORKSPACE \
             -executeMethod ShelfLife.Editor.Build.BuildScript.BuildAndroid \
@@ -140,7 +151,7 @@ jobs:
         run: |
           SIZE=$(stat -c%s Builds/*.apk 2>/dev/null || echo "0")
           TIME=$(grep -o "Build completed in [0-9.]* seconds" build.log 2>/dev/null | awk '{print $4}' || echo "unknown")
-          python Scripts/generate_ai_report.py \
+          python3 Scripts/generate_ai_report.py \
             --success \
             --apk-size "$SIZE" \
             --build-time "$TIME" \
