@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-Validate a Unity project structure before Unity runs.
-Checks for critical folders, packages, scripts, and configuration.
+Validate Unity project structure. Supports --generated flag to check generated assets.
 """
 
 import os
 import sys
 import json
+import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(os.getcwd())
 
-# Required relative paths (relative to project root)
 REQUIRED = {
     "folders": [
         "Assets",
@@ -42,26 +41,69 @@ REQUIRED = {
     ]
 }
 
-def check():
+def check_generated_assets():
+    """Check that generation produced the expected assets."""
     errors = []
     warnings = []
 
-    # Check folders
+    # Count scenes
+    scenes = list((PROJECT_ROOT / "Assets" / "_Project" / "Scenes").glob("*.unity")) if (PROJECT_ROOT / "Assets" / "_Project" / "Scenes").exists() else []
+    if len(scenes) < 2:
+        errors.append("Expected at least 2 scenes (MainMenu and Shop). Found: {}".format(len(scenes)))
+
+    # Check prefabs
+    prefabs = list((PROJECT_ROOT / "Assets" / "_Project" / "Prefabs").glob("*.prefab")) if (PROJECT_ROOT / "Assets" / "_Project" / "Prefabs").exists() else []
+    expected_prefabs = {"Player", "Shelf_Packaged", "ProductBox", "CheckoutCounter", "Customer", "DeliveryPallet"}
+    found_prefabs = {p.stem for p in prefabs}
+    missing = expected_prefabs - found_prefabs
+    if missing:
+        errors.append(f"Missing prefabs: {missing}")
+
+    # Check ScriptableObjects
+    so_path = PROJECT_ROOT / "Assets" / "_Project" / "Data" / "Products"
+    if not so_path.exists() or not list(so_path.glob("*.asset")):
+        warnings.append("No ProductData assets found. They may be created at runtime.")
+
+    report = {
+        "status": "PASS" if not errors else "FAIL",
+        "errors": errors,
+        "warnings": warnings,
+        "scene_count": len(scenes),
+        "prefab_count": len(prefabs),
+    }
+    with open("generated_assets_report.json", "w") as f:
+        json.dump(report, f, indent=2)
+
+    # Print
+    print("=== Generated Assets Validation ===")
+    print(f"Status: {report['status']}")
+    print(f"Scenes: {report['scene_count']}")
+    print(f"Prefabs: {report['prefab_count']}")
+    if errors:
+        for e in errors:
+            print(f"❌ {e}")
+    if warnings:
+        for w in warnings:
+            print(f"⚠️ {w}")
+
+    return len(errors) == 0
+
+def check_initial():
+    errors = []
+    warnings = []
+
     for folder in REQUIRED["folders"]:
         p = PROJECT_ROOT / folder
         if not p.is_dir():
             errors.append(f"Missing folder: {folder}")
 
-    # Check files
     for file in REQUIRED["files"]:
         p = PROJECT_ROOT / file
         if not p.is_file():
             errors.append(f"Missing file: {file}")
 
-    # Check packages in manifest.json
     manifest_path = PROJECT_ROOT / "Packages" / "manifest.json"
     if manifest_path.is_file():
-        import json
         with open(manifest_path, 'r') as f:
             manifest = json.load(f)
         deps = manifest.get("dependencies", {})
@@ -71,7 +113,6 @@ def check():
     else:
         errors.append("manifest.json missing")
 
-    # Prepare report
     report = {
         "status": "PASS" if not errors else "FAIL",
         "errors": errors,
@@ -79,11 +120,9 @@ def check():
         "passed_checks": len([f for f in REQUIRED["files"] if (PROJECT_ROOT / f).is_file()]) + len([f for f in REQUIRED["folders"] if (PROJECT_ROOT / f).is_dir()])
     }
 
-    # Write to file for later use
     with open("validation_report.json", "w") as f:
         json.dump(report, f, indent=2)
 
-    # Print summary
     print("=== Validation Report ===")
     print(f"Status: {report['status']}")
     if errors:
@@ -97,5 +136,16 @@ def check():
 
     return len(errors) == 0
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--generated", action="store_true", help="Check generated assets")
+    args = parser.parse_args()
+
+    if args.generated:
+        success = check_generated_assets()
+    else:
+        success = check_initial()
+    sys.exit(0 if success else 1)
+
 if __name__ == "__main__":
-    sys.exit(0 if check() else 1)
+    main()
