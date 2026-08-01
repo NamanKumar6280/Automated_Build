@@ -21,7 +21,7 @@ jobs:
         run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # Extract Unity version and hash from ProjectVersion.txt
+      # Extract Unity version and hash with clean trimming
       # ------------------------------------------------------------
       - name: Read Unity version and hash
         id: unity-version
@@ -31,16 +31,16 @@ jobs:
             exit 1
           fi
           VERSION_LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
-          VERSION=$(echo "$VERSION_LINE" | awk '{print $2}')
-          HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()' | xargs)
-          echo "VERSION=$VERSION"
-          echo "HASH=$HASH"
-          # Set environment variables
+          VERSION=$(echo "$VERSION_LINE" | awk '{print $2}' | tr -d '\n\r' | xargs)
+          HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()' | tr -d '\n\r' | xargs)
+          echo "Clean VERSION: '$VERSION'"
+          echo "Clean HASH: '$HASH'"
+          # Set environment variables (these are available in later steps)
           echo "UNITY_VERSION=$VERSION" >> $GITHUB_ENV
           echo "UNITY_HASH=$HASH" >> $GITHUB_ENV
-          # Set outputs (safe formatting)
-          printf "version=%s\n" "$VERSION" >> $GITHUB_OUTPUT
-          printf "hash=%s\n" "$HASH" >> $GITHUB_OUTPUT
+          # (Optional) Also write to a file if needed
+          echo "$VERSION" > unity_version.txt
+          echo "$HASH" > unity_hash.txt
 
       # ------------------------------------------------------------
       # Install Unity with dependencies and xvfb
