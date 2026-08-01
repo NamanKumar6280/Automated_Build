@@ -31,7 +31,6 @@ jobs:
           path: extracted/Library
           key: Library-${{ hashFiles('extracted/Assets/**') }}
           restore-keys: Library-
-
       - name: Build Android APK
         uses: game-ci/unity-builder@v4
         env:
@@ -42,6 +41,7 @@ jobs:
           projectPath: extracted
           targetPlatform: Android
           buildName: GeneratedProject
+          versioning: None
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
