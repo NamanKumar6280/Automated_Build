@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """
-Parse Unity log file and extract compiler errors/warnings into structured JSON.
-Usage: parse_unity_log.py <logfile> <output.json>
+Parse Unity log file for compiler errors/warnings.
+If log file doesn't exist, output empty JSON.
 """
 
 import sys
 import re
 import json
+import os
 
 def parse_log(log_path):
+    if not os.path.isfile(log_path):
+        return {"errors": [], "warnings": []}
+
     errors = []
     warnings = []
     with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    # Regex for Unity error lines (typical format)
     error_pattern = re.compile(r'(.+)\((\d+),(\d+)\): error ([A-Z0-9]+): (.+)')
     warning_pattern = re.compile(r'(.+)\((\d+),(\d+)\): warning ([A-Z0-9]+): (.+)')
-    # Also catch "error CS..." etc.
     for line in lines:
         m = error_pattern.search(line)
         if m:
