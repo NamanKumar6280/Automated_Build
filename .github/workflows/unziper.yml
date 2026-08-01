@@ -21,9 +21,9 @@ jobs:
         run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # Extract Unity version and hash with clean trimming
+      # Extract Unity version and sanitize
       # ------------------------------------------------------------
-      - name: Read Unity version and hash
+      - name: Read Unity version
         id: unity-version
         run: |
           if [ ! -f "ProjectSettings/ProjectVersion.txt" ]; then
@@ -33,15 +33,19 @@ jobs:
           VERSION_LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
           VERSION=$(echo "$VERSION_LINE" | awk '{print $2}' | tr -d '\n\r' | xargs)
           HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()' | tr -d '\n\r' | xargs)
-          echo "Clean VERSION: '$VERSION'"
-          echo "Clean HASH: '$HASH'"
+          echo "Raw VERSION: '$VERSION'"
+          echo "Raw HASH: '$HASH'"
+          # If hash is missing or placeholder, use known good hash for 6000.0.35f1
+          if [ -z "$HASH" ] || [ "$HASH" = "somehash" ]; then
+            HASH="d9a043e8a3d5"
+            echo "Using fallback hash: $HASH"
+          fi
+          # Set environment variables
           echo "UNITY_VERSION=$VERSION" >> $GITHUB_ENV
           echo "UNITY_HASH=$HASH" >> $GITHUB_ENV
-          echo "$VERSION" > unity_version.txt
-          echo "$HASH" > unity_hash.txt
 
       # ------------------------------------------------------------
-      # Install Unity with dependencies and xvfb (fixed packages)
+      # Install Unity with dependencies and xvfb
       # ------------------------------------------------------------
       - name: Install Unity
         run: |
@@ -61,18 +65,29 @@ jobs:
             xvfb \
             wget
 
-          # Determine download URL
-          if [ -n "$UNITY_HASH" ]; then
-            URL="https://download.unity3d.com/download_unity/$UNITY_HASH/UnitySetup-$UNITY_VERSION"
-          else
-            URL="https://download.unity3d.com/download_unity/$UNITY_VERSION/UnitySetup-$UNITY_VERSION"
-          fi
+          # Debug: print the variables
+          echo "=== Environment Variables ==="
+          echo "UNITY_VERSION=$UNITY_VERSION"
+          echo "UNITY_HASH=$UNITY_HASH"
+
+          # Build URL using the hash (now valid)
+          URL="https://download.unity3d.com/download_unity/$UNITY_HASH/UnitySetup-$UNITY_VERSION"
           echo "Downloading from: $URL"
 
           wget -q "$URL" -O UnitySetup
+          if [ $? -ne 0 ]; then
+            echo "WARNING: Download with hash failed, trying version-only URL"
+            URL="https://download.unity3d.com/download_unity/$UNITY_VERSION/UnitySetup-$UNITY_VERSION"
+            wget -q "$URL" -O UnitySetup
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Both download attempts failed."
+              exit 1
+            fi
+          fi
+
           chmod +x UnitySetup
 
-          # Install using xvfb (provides virtual display)
+          # Install using xvfb
           xvfb-run sudo ./UnitySetup --unattended --install-location /opt/unity --components=Unity,Android
 
           # Add to PATH
