@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Generate final AI report in Markdown and JSON formats.
-Usage:
-  generate_ai_report.py --compile-errors errors.json --output AIReport.md
-  generate_ai_report.py --success --apk-size <bytes> --build-time <seconds> --output AIReport.md
+Generate AI report in Markdown and JSON.
 """
 
 import sys
 import json
 import argparse
-from pathlib import Path
 import datetime
+import os
 
 def generate_from_compile_errors(errors_file, output_md, output_json):
     with open(errors_file, 'r') as f:
@@ -19,31 +16,25 @@ def generate_from_compile_errors(errors_file, output_md, output_json):
     errors = compile_data.get("errors", [])
     warnings = compile_data.get("warnings", [])
 
-    # Extract missing classes, namespaces, packages from error messages (simplified)
     missing_classes = []
     missing_namespaces = []
-    missing_packages = []
+    suggestions = []
     for e in errors:
         msg = e.get("message", "")
-        if "CS0246" in e.get("code", "") and "type or namespace" in msg:
-            # e.g., "The type or namespace name 'InputValue' could not be found"
+        code = e.get("code", "")
+        if "CS0246" in code and "type or namespace" in msg:
             parts = msg.split("'")
             if len(parts) >= 2:
                 missing_classes.append(parts[1])
-        if "CS0234" in e.get("code", ""):  # missing namespace
-            # "The type or namespace name 'X' does not exist in the namespace 'Y'"
+        if "CS0234" in code:
             parts = msg.split("'")
             if len(parts) >= 2:
                 missing_namespaces.append(parts[1])
-
-    # Suggest fixes
-    suggestions = []
-    for cls in missing_classes:
-        if "InputValue" in cls:
+        if "InputValue" in msg:
             suggestions.append("Install com.unity.inputsystem package and add using UnityEngine.InputSystem;")
-        elif "TextMeshPro" in cls:
+        if "TextMeshPro" in msg:
             suggestions.append("Ensure com.unity.textmeshpro is installed and import TMP Essentials.")
-        elif "NavMesh" in cls:
+        if "NavMesh" in msg:
             suggestions.append("Install com.unity.ai.navigation package.")
 
     report = {
@@ -53,13 +44,12 @@ def generate_from_compile_errors(errors_file, output_md, output_json):
         "missing_classes": list(set(missing_classes)),
         "missing_namespaces": list(set(missing_namespaces)),
         "suggested_fixes": list(set(suggestions)),
-        "raw_errors": errors[:10]  # first 10 for context
+        "raw_errors": errors[:10]
     }
 
     with open(output_json, 'w') as f:
         json.dump(report, f, indent=2)
 
-    # Markdown
     md = f"""# AI Build Report (Compile Failure)
 
 **Status**: {report['compilation']}
@@ -82,6 +72,16 @@ def generate_from_compile_errors(errors_file, output_md, output_json):
         f.write(md)
 
 def generate_success_report(apk_size, build_time, output_md):
+    # If apk_size is not a number, default to 0
+    try:
+        apk_size = int(apk_size)
+    except:
+        apk_size = 0
+
+    # build_time might be empty
+    if not build_time:
+        build_time = "unknown"
+
     md = f"""# AI Build Report (Success)
 
 **Build Status**: SUCCESS
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         json_out = args.output.replace(".md", ".json") if args.json else None
         generate_from_compile_errors(args.compile_errors, args.output, json_out)
     elif args.success:
-        generate_success_report(args.apk_size, args.build_time, args.output)
+        generate_success_report(args.apk_size or "0", args.build_time or "unknown", args.output)
     else:
         print("No valid mode specified.")
         sys.exit(1)
