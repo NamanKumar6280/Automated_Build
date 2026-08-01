@@ -35,25 +35,29 @@ jobs:
           HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()' | tr -d '\n\r' | xargs)
           echo "Clean VERSION: '$VERSION'"
           echo "Clean HASH: '$HASH'"
-          # Set environment variables (these are available in later steps)
           echo "UNITY_VERSION=$VERSION" >> $GITHUB_ENV
           echo "UNITY_HASH=$HASH" >> $GITHUB_ENV
-          # (Optional) Also write to a file if needed
           echo "$VERSION" > unity_version.txt
           echo "$HASH" > unity_hash.txt
 
       # ------------------------------------------------------------
-      # Install Unity with dependencies and xvfb
+      # Install Unity with dependencies and xvfb (fixed packages)
       # ------------------------------------------------------------
       - name: Install Unity
         run: |
-          # Install system dependencies
+          # Install system dependencies for Ubuntu 24.04 (Noble)
           sudo apt-get update -y
           sudo apt-get install -y \
-            libgl1-mesa-glx libglu1-mesa \
-            libxrandr2 libxcursor1 libxinerama1 \
-            libxi6 libxext6 libxfixes3 \
-            libx11-6 libxrender1 \
+            libgl1 \
+            libglu1-mesa \
+            libxrandr2 \
+            libxcursor1 \
+            libxinerama1 \
+            libxi6 \
+            libxext6 \
+            libxfixes3 \
+            libx11-6 \
+            libxrender1 \
             xvfb \
             wget
 
@@ -68,7 +72,7 @@ jobs:
           wget -q "$URL" -O UnitySetup
           chmod +x UnitySetup
 
-          # Install using xvfb
+          # Install using xvfb (provides virtual display)
           xvfb-run sudo ./UnitySetup --unattended --install-location /opt/unity --components=Unity,Android
 
           # Add to PATH
