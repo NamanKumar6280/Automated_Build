@@ -14,15 +14,15 @@ jobs:
         uses: actions/checkout@v4
 
       # ------------------------------------------------------------
-      # STEP 1: Validate project structure BEFORE Unity runs
+      # STEP 1: Validate project structure
       # ------------------------------------------------------------
       - name: Validate Unity project
         run: python Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # STEP 2: Install Unity & activate license (all in one)
+      # STEP 2: Install & activate Unity
       # ------------------------------------------------------------
-      - name: Install and activate Unity
+      - name: Install Unity
         id: unity-setup
         uses: RageAgainstThePixel/unity-setup@v2
         with:
@@ -30,15 +30,14 @@ jobs:
           build-targets: Android
           cache-installation: true
         env:
-          # These environment variables will be picked up by the action to activate Unity
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
       # ------------------------------------------------------------
-      # STEP 3: Compile only – capture compiler errors
+      # STEP 3: Compile only
       # ------------------------------------------------------------
-      - name: Compile scripts (headless)
+      - name: Compile scripts
         id: compile
         run: |
           ${{ env.UNITY_EDITOR_PATH }} \
@@ -48,12 +47,15 @@ jobs:
             -logFile compile.log
         continue-on-error: true
 
+      # ------------------------------------------------------------
+      # STEP 4: Parse compile errors (only if log exists)
+      # ------------------------------------------------------------
       - name: Parse compile errors
+        if: always()  # run even if compile failed
         run: python Scripts/parse_unity_log.py compile.log compile_errors.json
-        if: always()
 
       # ------------------------------------------------------------
-      # STEP 4: If compile fails, generate AI report and stop
+      # STEP 5: Generate AI report if compile failed
       # ------------------------------------------------------------
       - name: Generate AI Report (compile failure)
         if: steps.compile.outcome != 'success'
@@ -81,7 +83,7 @@ jobs:
         run: exit 1
 
       # ------------------------------------------------------------
-      # STEP 5: Run SetupRunner (generates scenes, prefabs, assets)
+      # STEP 6: Run SetupRunner
       # ------------------------------------------------------------
       - name: Run SetupRunner
         run: |
@@ -92,7 +94,7 @@ jobs:
             -logFile setup.log
 
       # ------------------------------------------------------------
-      # STEP 6: Validate generated assets
+      # STEP 7: Validate generated assets
       # ------------------------------------------------------------
       - name: Validate generated assets
         run: python Scripts/validate_project.py --generated
@@ -107,7 +109,7 @@ jobs:
           path: project_report.md
 
       # ------------------------------------------------------------
-      # STEP 7: Build Android APK
+      # STEP 8: Build Android APK
       # ------------------------------------------------------------
       - name: Build APK
         run: |
@@ -125,15 +127,17 @@ jobs:
           if-no-files-found: error
 
       # ------------------------------------------------------------
-      # STEP 8: Final AI Report (success)
+      # STEP 9: Final AI Report (success)
       # ------------------------------------------------------------
       - name: Generate final AI report
         if: always()
         run: |
+          SIZE=$(stat -c%s Builds/*.apk 2>/dev/null || echo "0")
+          TIME=$(grep -o "Build completed in [0-9.]* seconds" build.log 2>/dev/null | awk '{print $4}' || echo "unknown")
           python Scripts/generate_ai_report.py \
             --success \
-            --apk-size $(stat -c%s Builds/*.apk 2>/dev/null || echo 0) \
-            --build-time $(grep -o "Build completed in [0-9.]* seconds" build.log | awk '{print $4}' || echo "unknown") \
+            --apk-size "$SIZE" \
+            --build-time "$TIME" \
             --output AIReport.md
 
       - name: Upload final AI report
