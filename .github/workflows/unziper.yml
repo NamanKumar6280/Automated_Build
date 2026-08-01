@@ -27,35 +27,55 @@ jobs:
         run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # STEP 3: Install Unity manually (Linux)
+      # STEP 3: Extract Unity version and hash from ProjectVersion.txt
       # ------------------------------------------------------------
-      - name: Install Unity 6000.0.35f1
+      - name: Read Unity version and hash
+        id: unity-version
         run: |
-          # Download Unity installer (Linux)
-          wget -q https://download.unity3d.com/download_unity/6000.0.35f1/UnitySetup-6000.0.35f1 \
+          if [ ! -f "ProjectSettings/ProjectVersion.txt" ]; then
+            echo "ERROR: ProjectVersion.txt not found!"
+            exit 1
+          fi
+          VERSION_LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
+          VERSION=$(echo "$VERSION_LINE" | awk '{print $2}')
+          HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()')
+          echo "VERSION=$VERSION"
+          echo "HASH=$HASH"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------------------------
+      # STEP 4: Install Unity with dependencies and xvfb
+      # ------------------------------------------------------------
+      - name: Install Unity
+        run: |
+          echo "Installing Unity ${{ steps.unity-version.outputs.version }} (hash: ${{ steps.unity-version.outputs.hash }})"
+          # Install system dependencies
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libgl1-mesa-glx libglu1-mesa \
+            libxrandr2 libxcursor1 libxinerama1 \
+            libxi6 libxext6 libxfixes3 \
+            libx11-6 libxrender1 \
+            xvfb \
+            wget
+
+          # Download Unity installer
+          wget -q "https://download.unity3d.com/download_unity/${{ steps.unity-version.outputs.hash }}/UnitySetup-${{ steps.unity-version.outputs.version }}" \
             -O UnitySetup
           chmod +x UnitySetup
-          # Install to /opt/unity
-          sudo mkdir -p /opt/unity
-          sudo ./UnitySetup --unattended --install-location /opt/unity
+
+          # Install Unity headlessly using xvfb
+          xvfb-run sudo ./UnitySetup --unattended --install-location /opt/unity --components=Unity,Android
+
           # Add Unity to PATH
           echo "/opt/unity/Editor" >> $GITHUB_PATH
+
           # Verify installation
           /opt/unity/Editor/Unity -version
 
       # ------------------------------------------------------------
-      # STEP 4: Install Android build support (optional but recommended)
-      # ------------------------------------------------------------
-      - name: Install Android components
-        run: |
-          # Download Android module installer
-          wget -q https://download.unity3d.com/download_unity/6000.0.35f1/UnitySetup-Android-Support-for-Editor-6000.0.35f1 \
-            -O AndroidSetup
-          chmod +x AndroidSetup
-          sudo ./AndroidSetup --unattended --install-location /opt/unity
-
-      # ------------------------------------------------------------
-      # STEP 5: Activate Unity license (if you have a license)
+      # STEP 5: Activate Unity license (if you have one)
       # ------------------------------------------------------------
       - name: Activate Unity License
         run: |
@@ -69,7 +89,7 @@ jobs:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        continue-on-error: true   # Allows build to proceed even if activation fails (trial mode)
+        continue-on-error: true   # Continue even if license fails (trial mode)
 
       # ------------------------------------------------------------
       # STEP 6: Compile scripts (headless)
