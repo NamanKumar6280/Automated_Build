@@ -14,20 +14,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------
-      # STEP 1: Unzip the Unity project
-      # ------------------------------------------------------------
       - name: Unzip project
         run: python3 Scripts/unzip_project.py
 
-      # ------------------------------------------------------------
-      # STEP 2: Validate project structure
-      # ------------------------------------------------------------
       - name: Validate Unity project
         run: python3 Scripts/validate_project.py
 
       # ------------------------------------------------------------
-      # STEP 3: Extract Unity version and hash from ProjectVersion.txt
+      # Extract Unity version and hash from ProjectVersion.txt
       # ------------------------------------------------------------
       - name: Read Unity version and hash
         id: unity-version
@@ -38,18 +32,21 @@ jobs:
           fi
           VERSION_LINE=$(grep "m_EditorVersion" ProjectSettings/ProjectVersion.txt)
           VERSION=$(echo "$VERSION_LINE" | awk '{print $2}')
-          HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()')
+          HASH=$(echo "$VERSION_LINE" | awk '{print $3}' | tr -d '()' | xargs)
           echo "VERSION=$VERSION"
           echo "HASH=$HASH"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          # Set environment variables
+          echo "UNITY_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "UNITY_HASH=$HASH" >> $GITHUB_ENV
+          # Set outputs (safe formatting)
+          printf "version=%s\n" "$VERSION" >> $GITHUB_OUTPUT
+          printf "hash=%s\n" "$HASH" >> $GITHUB_OUTPUT
 
       # ------------------------------------------------------------
-      # STEP 4: Install Unity with dependencies and xvfb
+      # Install Unity with dependencies and xvfb
       # ------------------------------------------------------------
       - name: Install Unity
         run: |
-          echo "Installing Unity ${{ steps.unity-version.outputs.version }} (hash: ${{ steps.unity-version.outputs.hash }})"
           # Install system dependencies
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -60,22 +57,28 @@ jobs:
             xvfb \
             wget
 
-          # Download Unity installer
-          wget -q "https://download.unity3d.com/download_unity/${{ steps.unity-version.outputs.hash }}/UnitySetup-${{ steps.unity-version.outputs.version }}" \
-            -O UnitySetup
+          # Determine download URL
+          if [ -n "$UNITY_HASH" ]; then
+            URL="https://download.unity3d.com/download_unity/$UNITY_HASH/UnitySetup-$UNITY_VERSION"
+          else
+            URL="https://download.unity3d.com/download_unity/$UNITY_VERSION/UnitySetup-$UNITY_VERSION"
+          fi
+          echo "Downloading from: $URL"
+
+          wget -q "$URL" -O UnitySetup
           chmod +x UnitySetup
 
-          # Install Unity headlessly using xvfb
+          # Install using xvfb
           xvfb-run sudo ./UnitySetup --unattended --install-location /opt/unity --components=Unity,Android
 
-          # Add Unity to PATH
+          # Add to PATH
           echo "/opt/unity/Editor" >> $GITHUB_PATH
 
-          # Verify installation
+          # Verify
           /opt/unity/Editor/Unity -version
 
       # ------------------------------------------------------------
-      # STEP 5: Activate Unity license (if you have one)
+      # Activate Unity license (optional)
       # ------------------------------------------------------------
       - name: Activate Unity License
         run: |
@@ -89,10 +92,10 @@ jobs:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        continue-on-error: true   # Continue even if license fails (trial mode)
+        continue-on-error: true
 
       # ------------------------------------------------------------
-      # STEP 6: Compile scripts (headless)
+      # Compile scripts
       # ------------------------------------------------------------
       - name: Compile scripts
         id: compile
@@ -134,7 +137,7 @@ jobs:
         run: exit 1
 
       # ------------------------------------------------------------
-      # STEP 7: Run SetupRunner
+      # Run SetupRunner
       # ------------------------------------------------------------
       - name: Run SetupRunner
         run: |
@@ -145,7 +148,7 @@ jobs:
             -logFile setup.log
 
       # ------------------------------------------------------------
-      # STEP 8: Validate generated assets
+      # Validate generated assets
       # ------------------------------------------------------------
       - name: Validate generated assets
         run: python3 Scripts/validate_project.py --generated
@@ -160,7 +163,7 @@ jobs:
           path: project_report.md
 
       # ------------------------------------------------------------
-      # STEP 9: Build Android APK
+      # Build Android APK
       # ------------------------------------------------------------
       - name: Build APK
         run: |
@@ -178,7 +181,7 @@ jobs:
           if-no-files-found: error
 
       # ------------------------------------------------------------
-      # STEP 10: Final AI Report
+      # Final AI Report
       # ------------------------------------------------------------
       - name: Generate final AI report
         if: always()
